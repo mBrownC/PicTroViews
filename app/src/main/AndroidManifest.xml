@@ -1,18 +1,37 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  AndroidManifest.xml - Archivo de configuración principal de la aplicación PicTroViews
+
+  Este archivo define los permisos, características de hardware, actividades y
+  configuración de servicios externos como Google Maps.
+-->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- Permisos de ubicación (aproximada) -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
+    <!-- Requisito de cámara -->
     <uses-feature android:name="android.hardware.camera" />
     <uses-permission android:name="android.permission.CAMERA" />
+
+    <!-- Permiso de ubicación precisa -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+
+    <!-- Requisito de brújula -->
     <uses-feature android:name="android.hardware.sensor.compass" android:required="true" />
 
-
+    <!-- Permiso de ubicación precisa (ignorando advertencia) -->
     <uses-permission
         android:name="android.permission.ACCESS_FINE_LOCATION"
         tools:ignore="CoarseFineLocation" />
+
+    <!-- Permiso de Internet para mapas -->
     <uses-permission android:name="android.permission.INTERNET" />
+
+    <!-- Permiso para escribir en almacenamiento externo (para Android < 10) -->
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="28" />
 
     <application
         android:allowBackup="true"
@@ -24,13 +43,30 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.PicTroViews"
         tools:targetApi="31">
+
+        <!-- Actividad MenuApp para captura de fotos -->
         <activity
             android:name=".MenuApp"
             android:theme="@style/Theme.Design.NoActionBar"
             android:exported="false" />
+
+        <!-- Configuración de Google Maps API -->
         <meta-data
             android:name="com.google.android.geo.API_KEY"
             android:value="${MAPS_API_KEY}" />
+
+        <!-- FileProvider: Permite compartir archivos de forma segura con otras apps -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="com.example.pictroviews.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
+        <!-- Actividad principal de la aplicación -->
         <activity
             android:name=".MainActivity"
             android:theme="@style/Theme.Design.NoActionBar"
@@ -38,7 +74,6 @@
 
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>

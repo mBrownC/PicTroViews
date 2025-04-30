@@ -1,4 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
-<paths xmlns:android="http://schemas.android.com/apk/res/android">
-  
+<!--
+  file_paths.xml - Configuración de rutas compartibles para FileProvider
+
+  Este archivo define qué directorios pueden ser accedidos por otras aplicaciones
+  a través de URIs de tipo content:// generados por FileProvider.
+
+  En este caso, permitimos compartir:
+  - El directorio de imágenes dentro de los archivos externos de la aplicación
+-->
+<paths>
+    <!--
+      external-files-path: Corresponde a Context.getExternalFilesDir()
+      name: Un nombre para referenciar esta ruta en URIs
+      path: La subcarpeta dentro del directorio externo de la aplicación
+    -->
+    <external-files-path name="my_images" path="Pictures" />
 </paths>

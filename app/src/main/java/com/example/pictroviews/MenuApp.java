@@ -5,7 +5,7 @@ import android.content.ContentValues;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
-import android.graphics.Color;
+import android.graphics.BitmapFactory;
 import android.location.Location;
 import android.location.LocationListener;
 import android.location.LocationManager;
@@ -36,6 +36,7 @@ import java.util.Locale;
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
+import androidx.core.content.FileProvider;
 
 import com.google.android.gms.maps.CameraUpdateFactory;
 import com.google.android.gms.maps.GoogleMap;
@@ -53,6 +54,21 @@ import java.io.IOException;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 
+/**
+ * MenuApp - Actividad principal de la aplicación para captura de fotos geolocalizadas
+ *
+ * Esta clase implementa:
+ * - Visualización de un mapa de Google para mostrar la ubicación actual
+ * - Captura de fotos mediante la cámara del dispositivo
+ * - Almacenamiento de imágenes con nombres basados en coordenadas GPS
+ * - Seguimiento en tiempo real de la ubicación del usuario
+ *
+ * La aplicación utiliza Java 17 y aprovecha sus características para el manejo
+ * eficiente de las coordenadas GPS y el procesamiento de imágenes.
+ *
+ * @author mbrown
+ * @version 1.0
+ */
 public class MenuApp extends AppCompatActivity implements OnMapReadyCallback {
 
     private LocationHandlerThread locationHandlerThread;
@@ -72,6 +88,11 @@ public class MenuApp extends AppCompatActivity implements OnMapReadyCallback {
     private ImageView photoImageView;
     private SensorManager sensorManager;
     private Sensor orientationSensor;
+
+    // Variable para almacenar la URI de la foto que se va a tomar
+    private Uri photoURI;
+    // Variable para almacenar la ruta del archivo de la foto
+    private String currentPhotoPath;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -126,16 +147,10 @@ public class MenuApp extends AppCompatActivity implements OnMapReadyCallback {
         };
 
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED && ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-            // TODO: Consider calling
-            //    ActivityCompat#requestPermissions
-            // here to request the missing permissions, and then overriding
-            //   public void onRequestPermissionsResult(int requestCode, String[] permissions,
-            //                                          int[] grantResults)
-            // to handle the case where the user grants the permission. See the documentation
-            // for ActivityCompat#requestPermissions for more details.
             return;
         }
-        locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 0, 0, locationListener);    }
+        locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 0, 0, locationListener);
+    }
 
     @Override
     public void onMapReady(GoogleMap map) {
@@ -145,6 +160,7 @@ public class MenuApp extends AppCompatActivity implements OnMapReadyCallback {
             showCurrentLocationOnMap(lastKnownLocation);
         }
     }
+
     private void showCurrentLocationOnMap(Location location) {
         if (googleMap != null) {
             LatLng currentLatLng = new LatLng(location.getLatitude(), location.getLongitude());
@@ -164,9 +180,14 @@ public class MenuApp extends AppCompatActivity implements OnMapReadyCallback {
             });
         }
     }
+
     public void capturePhoto(View view) {
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-            ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.ACCESS_FINE_LOCATION}, REQUEST_CAMERA_PERMISSION);
+            ActivityCompat.requestPermissions(this, new String[]{
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.CAMERA,
+                    Manifest.permission.WRITE_EXTERNAL_STORAGE
+            }, REQUEST_CAMERA_PERMISSION);
         } else {
             lastLocation = getLastKnownLocation();
             if (lastLocation != null) {
@@ -178,77 +199,188 @@ public class MenuApp extends AppCompatActivity implements OnMapReadyCallback {
         }
     }
 
+    /**
+     * Crea un archivo de imagen usando un nombre de archivo único.
+     * El nombre incluye un timestamp para garantizar que sea único.
+     */
+    private File createImageFile() throws IOException {
+        // Crear un nombre de archivo único con timestamp
+        String timeStamp = new SimpleDateFormat("dd-MM-yyyy_HH-mm", Locale.getDefault()).format(new Date());
+        String coordinates = "";
+
+        // Añadir coordenadas al nombre si están disponibles
+        if (lastLocation != null) {
+            double latitude = lastLocation.getLatitude();
+            double longitude = lastLocation.getLongitude();
+            coordinates = String.format(Locale.US, "LAT%.6f_LON%.6f", latitude, longitude);
+        }
+
+        String imageFileName = "IMG_" + timeStamp + "_" + coordinates;
+
+        // Obtener el directorio de almacenamiento
+        File storageDir = getExternalFilesDir(Environment.DIRECTORY_PICTURES);
+        File image = File.createTempFile(
+                imageFileName,  /* prefijo */
+                ".jpg",         /* sufijo */
+                storageDir      /* directorio */
+        );
+
+        // Guardar la ruta del archivo para usarla con intents
+        currentPhotoPath = image.getAbsolutePath();
+        return image;
+    }
+
+    /**
+     * Inicia la aplicación de cámara y configura el archivo donde se guardará la imagen.
+     * Utiliza FileProvider para manejar la seguridad en versiones nuevas de Android.
+     */
+    private void dispatchTakePictureIntent() {
+        Intent takePictureIntent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+
+        // Verificar que hay una aplicación para manejar la solicitud
+        if (takePictureIntent.resolveActivity(getPackageManager()) != null) {
+            // Crear el archivo donde se guardará la foto
+            File photoFile = null;
+            try {
+                photoFile = createImageFile();
+            } catch (IOException ex) {
+                // Error al crear el archivo
+                Log.e("TakePicture", "Error al crear el archivo de imagen", ex);
+                Toast.makeText(this, "Error al crear archivo de imagen", Toast.LENGTH_SHORT).show();
+                return;
+            }
+
+            // Si el archivo se creó exitosamente, continuar
+            if (photoFile != null) {
+                // Obtener URI para el archivo usando FileProvider
+                photoURI = FileProvider.getUriForFile(this,
+                        "com.example.pictroviews.fileprovider",
+                        photoFile);
+
+                // Configurar el intent para guardar la imagen en el URI especificado
+                takePictureIntent.putExtra(MediaStore.EXTRA_OUTPUT, photoURI);
+
+                // Iniciar la actividad
+                startActivityForResult(takePictureIntent, REQUEST_IMAGE_CAPTURE);
+            }
+        }
+    }
+
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
 
         if (requestCode == REQUEST_IMAGE_CAPTURE && resultCode == RESULT_OK) {
-            Bundle extras = data.getExtras();
-            Bitmap imageBitmap = (Bitmap) extras.get("data");
-            saveImage(imageBitmap);
-            photoImageView.setImageBitmap(imageBitmap);
-            updatePhotoLocationMarker();
-            updateUIWithNewLocation();
-        }
-    }
-    private void backToMainMenu(){
-        Intent intent = new Intent(this, MainActivity.class);
-        startActivity(intent);
-    }
-    private void updateUIWithNewLocation() {
-        if (lastLocation != null && googleMap != null) {
-            double latitude = lastLocation.getLatitude();
-            double longitude = lastLocation.getLongitude();
-            SimpleDateFormat sdf = new SimpleDateFormat("HH:mm:ss", Locale.getDefault());
-            String currentTime = sdf.format(Calendar.getInstance().getTime());
-            String time = currentTime;
-            latitud.setText("Latitud: " + latitude);
-            longitud.setText("Longitud: " + longitude);
-            hora.setText("Hora: " + time);
-            LatLng locationLatLng = new LatLng(latitude, longitude);
-            addMarker(locationLatLng);
-            moveCamera(locationLatLng);
-        }
-    }
-    private void updatePhotoLocationMarker() {
-        if (lastLocation != null && googleMap != null) {
-            LatLng photoLatLng = new LatLng(lastLocation.getLatitude(), lastLocation.getLongitude());
-            if (photoLocationMarker != null) {
-                photoLocationMarker.remove();
+            try {
+                // Procesar la imagen capturada desde archivo (alta resolución)
+                processAndDisplayImage();
+
+                // Actualizar el marcador y la UI con la información de ubicación
+                updatePhotoLocationMarker();
+                updateUIWithNewLocation();
+            } catch (Exception e) {
+                e.printStackTrace();
+                Log.e("PhotoCapture", "Error al procesar la foto: " + e.getMessage());
+                Toast.makeText(this, "Error al procesar la foto", Toast.LENGTH_SHORT).show();
             }
-            photoLocationMarker = googleMap.addMarker(new MarkerOptions()
-                    .position(photoLatLng)
-                    .title("Ubicación de la foto")
-                    .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED)));
-            googleMap.animateCamera(CameraUpdateFactory.newLatLngZoom(photoLatLng, 15f));
         }
     }
-    private void dispatchTakePictureIntent() {
-        Intent takePictureIntent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
-        if (takePictureIntent.resolveActivity(getPackageManager()) != null) {
-            startActivityForResult(takePictureIntent, REQUEST_IMAGE_CAPTURE);
+
+    /**
+     * Procesa la imagen capturada, la muestra en la UI y la guarda en la galería.
+     */
+    private void processAndDisplayImage() {
+        try {
+            // Cargar la imagen para mostrarla en la UI
+            Bitmap fullBitmap = getBitmapFromFile();
+
+            if (fullBitmap != null) {
+                // Escalar el bitmap para mostrarlo en la ImageView
+                Bitmap displayBitmap = getScaledBitmap(fullBitmap, photoImageView.getWidth(), photoImageView.getHeight());
+                photoImageView.setImageBitmap(displayBitmap);
+
+                // Guardar la imagen en la galería
+                saveImageToGallery(fullBitmap);
+            } else {
+                Log.e("ProcessImage", "No se pudo cargar la imagen desde: " + currentPhotoPath);
+                Toast.makeText(this, "Error al cargar la imagen", Toast.LENGTH_SHORT).show();
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+            Log.e("ProcessImage", "Error procesando imagen: " + e.getMessage());
+            Toast.makeText(this, "Error al procesar imagen", Toast.LENGTH_SHORT).show();
         }
     }
-    private void saveImage(Bitmap imageBitmap) {
-        // Obtener coordenadas de lastLocation
+
+    /**
+     * Carga el bitmap desde el archivo de la foto
+     */
+    private Bitmap getBitmapFromFile() {
+        // Obtener las dimensiones del ImageView
+        int targetW = photoImageView.getWidth();
+        int targetH = photoImageView.getHeight();
+
+        // Si el ImageView no tiene dimensiones aún, usar valores predeterminados
+        if (targetW <= 0) targetW = 800;
+        if (targetH <= 0) targetH = 800;
+
+        // Obtener las dimensiones del bitmap
+        BitmapFactory.Options bmOptions = new BitmapFactory.Options();
+        bmOptions.inJustDecodeBounds = true;
+        BitmapFactory.decodeFile(currentPhotoPath, bmOptions);
+        int photoW = bmOptions.outWidth;
+        int photoH = bmOptions.outHeight;
+
+        // Calcular cuánto reducir la imagen
+        int scaleFactor = Math.max(1, Math.min(photoW/targetW, photoH/targetH));
+
+        // Decodificar el archivo de imagen en un Bitmap de tamaño reducido
+        bmOptions.inJustDecodeBounds = false;
+        bmOptions.inSampleSize = scaleFactor;
+
+        return BitmapFactory.decodeFile(currentPhotoPath, bmOptions);
+    }
+
+    /**
+     * Escala un bitmap para ajustarse a las dimensiones especificadas
+     */
+    private Bitmap getScaledBitmap(Bitmap bitmap, int targetWidth, int targetHeight) {
+        if (targetWidth <= 0 || targetHeight <= 0) {
+            return bitmap; // Si las dimensiones no son válidas, devolver el original
+        }
+
+        float scaleFactor = Math.min(
+                (float) targetWidth / bitmap.getWidth(),
+                (float) targetHeight / bitmap.getHeight());
+
+        return Bitmap.createScaledBitmap(
+                bitmap,
+                Math.round(bitmap.getWidth() * scaleFactor),
+                Math.round(bitmap.getHeight() * scaleFactor),
+                true);
+    }
+
+    /**
+     * Guarda la imagen en la galería del dispositivo
+     */
+    private void saveImageToGallery(Bitmap imageBitmap) {
+        // Obtener coordenadas para el nombre del archivo
         String coordinates = "";
         if (lastLocation != null) {
             double latitude = lastLocation.getLatitude();
             double longitude = lastLocation.getLongitude();
-            // Formatear coordenadas con 6 decimales
             coordinates = String.format(Locale.US, "LAT%.6f_LON%.6f", latitude, longitude);
         }
 
-        // Usar el formato de fecha solicitado: dd-MM-yyyy_HH-mm
+        // Crear nombre de archivo con formato y coordenadas
         String timeStamp = new SimpleDateFormat("dd-MM-yyyy_HH-mm", Locale.getDefault()).format(new Date());
-
-        // Combinar la marca de tiempo con las coordenadas
         String imageFileName = "IMG_" + timeStamp + "_" + coordinates;
 
         ContentValues values = new ContentValues();
         values.put(MediaStore.Images.Media.DISPLAY_NAME, imageFileName + ".jpg");
         values.put(MediaStore.Images.Media.MIME_TYPE, "image/jpeg");
 
+        // Para Android 10 (API 29) y superior, usar el nuevo sistema de almacenamiento
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             values.put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/PicTroViews");
             values.put(MediaStore.Images.Media.IS_PENDING, 1);
@@ -261,10 +393,11 @@ public class MenuApp extends AppCompatActivity implements OnMapReadyCallback {
             if (imageUri != null) {
                 OutputStream outputStream = resolver.openOutputStream(imageUri);
                 if (outputStream != null) {
+                    // Guardar la imagen sin comprimir para mantener la calidad
                     imageBitmap.compress(Bitmap.CompressFormat.JPEG, 100, outputStream);
                     outputStream.close();
 
-                    // Solo para Android 10+
+                    // Para Android 10+, marcar que ya no está pendiente
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                         values.clear();
                         values.put(MediaStore.Images.Media.IS_PENDING, 0);
@@ -290,11 +423,46 @@ public class MenuApp extends AppCompatActivity implements OnMapReadyCallback {
         }
     }
 
+    private void backToMainMenu(){
+        Intent intent = new Intent(this, MainActivity.class);
+        startActivity(intent);
+    }
+
+    private void updateUIWithNewLocation() {
+        if (lastLocation != null && googleMap != null) {
+            double latitude = lastLocation.getLatitude();
+            double longitude = lastLocation.getLongitude();
+            SimpleDateFormat sdf = new SimpleDateFormat("HH:mm:ss", Locale.getDefault());
+            String currentTime = sdf.format(Calendar.getInstance().getTime());
+            String time = currentTime;
+            latitud.setText("Latitud: " + latitude);
+            longitud.setText("Longitud: " + longitude);
+            hora.setText("Hora: " + time);
+            LatLng locationLatLng = new LatLng(latitude, longitude);
+            addMarker(locationLatLng);
+            moveCamera(locationLatLng);
+        }
+    }
+
+    private void updatePhotoLocationMarker() {
+        if (lastLocation != null && googleMap != null) {
+            LatLng photoLatLng = new LatLng(lastLocation.getLatitude(), lastLocation.getLongitude());
+            if (photoLocationMarker != null) {
+                photoLocationMarker.remove();
+            }
+            photoLocationMarker = googleMap.addMarker(new MarkerOptions()
+                    .position(photoLatLng)
+                    .title("Ubicación de la foto")
+                    .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED)));
+            googleMap.animateCamera(CameraUpdateFactory.newLatLngZoom(photoLatLng, 15f));
+        }
+    }
+
     private void addMarker(LatLng latLng) {
         if (photoLocationMarker != null) {
-            photoLocationMarker .remove();
+            photoLocationMarker.remove();
         }
-        photoLocationMarker  = googleMap.addMarker(new MarkerOptions()
+        photoLocationMarker = googleMap.addMarker(new MarkerOptions()
                 .position(latLng)
                 .title("Ubicación de la foto")
                 .icon(BitmapDescriptorFactory.defaultMarker(BitmapDescriptorFactory.HUE_RED)));
@@ -308,20 +476,26 @@ public class MenuApp extends AppCompatActivity implements OnMapReadyCallback {
     public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == REQUEST_CAMERA_PERMISSION) {
-            boolean cameraPermissionGranted = grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED;
-            boolean locationPermissionGranted = grantResults.length > 1 && grantResults[1] == PackageManager.PERMISSION_GRANTED;
-            boolean storagePermissionGranted = grantResults.length > 2 && grantResults[2] == PackageManager.PERMISSION_GRANTED;
+            boolean allPermissionsGranted = true;
 
-            if (cameraPermissionGranted && locationPermissionGranted && storagePermissionGranted) {
+            for (int result : grantResults) {
+                if (result != PackageManager.PERMISSION_GRANTED) {
+                    allPermissionsGranted = false;
+                    break;
+                }
+            }
+
+            if (allPermissionsGranted) {
                 capturePhoto(null);
             } else {
-                Toast.makeText(this, "Permisos de cámara, ubicación y/o almacenamiento denegados", Toast.LENGTH_SHORT).show();
+                Toast.makeText(this, "Se necesitan todos los permisos para tomar fotos", Toast.LENGTH_SHORT).show();
             }
         }
         else{
             startLocationUpdates();
         }
     }
+
     private Location getLastKnownLocation() {
         LocationManager locationManager = (LocationManager) getSystemService(LOCATION_SERVICE);
         if (locationManager != null) {
@@ -333,6 +507,7 @@ public class MenuApp extends AppCompatActivity implements OnMapReadyCallback {
         }
         return null;
     }
+
     public void startLocationUpdates() {
         if (locationHandlerThread != null) {
             locationHandlerThread.requestLocationUpdates(locationManager);
@@ -342,32 +517,34 @@ public class MenuApp extends AppCompatActivity implements OnMapReadyCallback {
     }
 
     private void stopLocationUpdates() {
-
-            locationHandlerThread.stopLocationUpdates(locationManager);
-            runOnUiThread(new Runnable() {
-                @Override
-                public void run() {
-
-                }
-            });
-        }
-
+        locationHandlerThread.stopLocationUpdates(locationManager);
+        runOnUiThread(new Runnable() {
+            @Override
+            public void run() {
+                // Implementación opcional
+            }
+        });
+    }
 
     @Override
     protected void onDestroy() {
         super.onDestroy();
-
+        // Liberar recursos adicionales si es necesario
     }
+
     public class LocationHandlerThread extends HandlerThread {
         private Handler handler;
         private LocationListener locationListener;
+
         public void setLocationListener(LocationListener listener) {
             locationListener = listener;
         }
+
         public LocationHandlerThread(String name, LocationListener listener) {
             super(name);
             locationListener = listener;
         }
+
         public void postTask(Runnable task) {
             handler.post(task);
         }
@@ -385,21 +562,14 @@ public class MenuApp extends AppCompatActivity implements OnMapReadyCallback {
                 public void run() {
                     if (locationManager != null && locationListener != null) {
                         if (ActivityCompat.checkSelfPermission(MenuApp.this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED && ActivityCompat.checkSelfPermission(MenuApp.this, Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-                            // TODO: Consider calling
-                            //    ActivityCompat#requestPermissions
-                            // here to request the missing permissions, and then overriding
-                            //   public void onRequestPermissionsResult(int requestCode, String[] permissions,
-                            //                                          int[] grantResults)
-                            // to handle the case where the user grants the permission. See the documentation
-                            // for ActivityCompat#requestPermissions for more details.
                             return;
                         }
                         locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000, 1, locationListener);
-
                     }
                 }
             });
         }
+
         public void stopLocationUpdates(LocationManager locationManager) {
             if (handler == null) {
                 throw new IllegalStateException("Handler not prepared. Call prepareHandler() first.");
